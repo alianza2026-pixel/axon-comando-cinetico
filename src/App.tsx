@@ -35,7 +35,7 @@ import Markdown from 'react-markdown';
 import { cn } from './lib/utils';
 import { Worker, Alert, PPEStatus, DiagnosticResult, Company, MedicalExam, Vaccination } from './types';
 import { analyzeSafetyData, generateFormat } from './services/gemini';
-import { auth, db } from './firebase';
+// Firebase y Auth reemplazados por Supabase
 import { supabase, loginWithGoogle, logout } from './supabase';
 import { User } from '@supabase/supabase-js';
 import { 
@@ -48,7 +48,8 @@ import {
   setDoc,
   getDocFromServer,
   query,
-  orderBy
+  orderBy,
+  db
 } from './firebase-adapter';
 
 enum OperationType {

@@ -9,6 +9,7 @@ export const collection = (db: any, path: string) => path;
 export const query = (col: any, ...args: any[]) => ({ path: col, args });
 export const orderBy = (field: string, dir: string) => ({ type: 'orderBy', field, dir });
 export const doc = (db: any, colName: string, id: string) => ({ colName, id });
+export const db = {}; // Mock db para App.tsx
 
 export const onSnapshot = (
   queryObj: any, 
