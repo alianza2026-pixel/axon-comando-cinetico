@@ -35,8 +35,9 @@ import Markdown from 'react-markdown';
 import { cn } from './lib/utils';
 import { Worker, Alert, PPEStatus, DiagnosticResult, Company, MedicalExam, Vaccination } from './types';
 import { analyzeSafetyData, generateFormat } from './services/gemini';
-import { auth, db, loginWithGoogle, logout } from './firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { auth, db } from './firebase';
+import { supabase, loginWithGoogle, logout } from './supabase';
+import { User } from '@supabase/supabase-js';
 import { 
   collection, 
   onSnapshot, 
@@ -48,7 +49,7 @@ import {
   getDocFromServer,
   query,
   orderBy
-} from 'firebase/firestore';
+} from './firebase-adapter';
 
 enum OperationType {
   CREATE = 'create',
@@ -82,17 +83,12 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
+      userId: undefined, // Ignoramos esto temporalmente
+      email: undefined,
+      emailVerified: undefined,
+      isAnonymous: undefined,
+      tenantId: undefined,
+      providerInfo: []
     },
     operationType,
     path
@@ -330,14 +326,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
       setIsAuthReady(true);
     });
-    return () => unsubscribe();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setIsAuthReady(true);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const isAdmin = user?.email === "alianza2026@sociedadsst26.com" && user?.emailVerified;
+  const isAdmin = user?.email === "alianza2026@sociedadsst26.com";
 
   // Real-time updates from Firestore
   useEffect(() => {
@@ -683,7 +685,7 @@ export default function App() {
             {user ? (
               <div className="flex items-center gap-3 pl-4 border-l border-outline-variant/20">
                 <div className="text-right hidden sm:block">
-                  <div className="text-[10px] font-black text-on-surface uppercase tracking-widest leading-none mb-1">{user.displayName || 'USUARIO'}</div>
+                  <div className="text-[10px] font-black text-on-surface uppercase tracking-widest leading-none mb-1">{user.user_metadata?.full_name || user.user_metadata?.name || 'USUARIO'}</div>
                   <div className="text-[8px] font-bold text-primary uppercase tracking-tighter leading-none">{isAdmin ? 'ADMINISTRADOR' : 'OBSERVADOR'}</div>
                 </div>
                 <button 
