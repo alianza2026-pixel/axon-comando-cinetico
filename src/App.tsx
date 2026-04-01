@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Shield, 
   AlertTriangle, 
@@ -297,6 +297,16 @@ export default function App() {
   const [aiResponse, setAiResponse] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'workers' | 'alerts' | 'diagnostics' | 'surveillance' | 'settings' | 'companies' | 'ai-assistant'>('overview');
+  const [newCompany, setNewCompany] = useState<Partial<Company>>({
+    name: '',
+    nit: '',
+    riskLevel: 1,
+    workerCount: 0,
+    sector: '',
+    standardsCount: 7,
+    completedStandards: [],
+    compliancePercentage: 0
+  });
   const [currentTime, setCurrentTime] = useState(new Date());
   const [searchQuery, setSearchQuery] = useState('');
   const [alertFilter, setAlertFilter] = useState<'Todos' | 'Críticos' | 'Avisos'>('Todos');
@@ -309,14 +319,6 @@ export default function App() {
   const [workerFilter, setWorkerFilter] = useState<'Todos' | 'Activos' | 'Retirados'>('Todos');
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
   const [editingWorker, setEditingWorker] = useState<Worker | null>(null);
-  const [newCompany, setNewCompany] = useState<Partial<Company>>({
-    name: '',
-    nit: '',
-    riskLevel: 1,
-    workerCount: 0,
-    sector: 'Otros',
-    driveFolderUrl: ''
-  });
   const [newWorker, setNewWorker] = useState<Partial<Worker>>({
     name: '',
     role: '',
@@ -354,7 +356,9 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const isAdmin = user?.email === "alianza2026@sociedadsst26.com";
+  const isAdmin = useMemo(() => {
+    return userProfile?.role === 'admin' || user?.email === 'alianza2026@sociedadsst26.com';
+  }, [userProfile, user]);
 
   // Real-time updates from Firestore
   useEffect(() => {
@@ -472,30 +476,48 @@ export default function App() {
     return 62;
   };
 
-  const handleAddCompany = async () => {
-    if (!newCompany.name || !newCompany.nit || !isAdmin) return;
+  const handleAddCompany = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCompany.name || !newCompany.nit || !user) return;
     
-    const standards = calculateStandards(newCompany.riskLevel || 1, newCompany.workerCount || 0);
-    const id = `C-${Math.random().toString(36).substr(2, 9)}`;
-    const company: Company = {
-      id,
-      name: newCompany.name,
-      nit: newCompany.nit,
-      riskLevel: (newCompany.riskLevel as 1|2|3|4|5) || 1,
-      workerCount: newCompany.workerCount || 0,
-      sector: newCompany.sector || 'Otros',
-      driveFolderUrl: newCompany.driveFolderUrl || '',
-      standardsCount: standards,
-      completedStandards: [],
-      compliancePercentage: 0
-    };
-
+    setIsLoggingIn(true);
     try {
-      await setDoc(doc(db, 'companies', id), company);
-      setShowNewCompanyModal(false);
-      setNewCompany({ name: '', nit: '', riskLevel: 1, workerCount: 0, sector: 'Otros', driveFolderUrl: '' });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `companies/${id}`);
+      const { data, error } = await supabase
+        .from('companies')
+        .insert([{
+          name: newCompany.name,
+          nit: newCompany.nit,
+          risk_level: newCompany.riskLevel || 1,
+          worker_count: newCompany.workerCount || 0,
+          sector: newCompany.sector || 'Otros',
+          standards_count: newCompany.standardsCount || 7,
+          completed_standards: [],
+          compliance_percentage: 0,
+          user_id: user.id
+        }])
+        .select();
+
+      if (error) throw error;
+
+      if (data) {
+        setCompanies([...companies, data[0] as Company]);
+        setNewCompany({
+          name: '',
+          nit: '',
+          riskLevel: 1,
+          workerCount: 0,
+          sector: '',
+          standardsCount: 7,
+          completedStandards: [],
+          compliancePercentage: 0
+        });
+        alert('¡EMPRESA REGISTRADA EXITOSAMENTE EN SUPABASE! 🏢✅');
+      }
+    } catch (error: any) {
+      console.error('Error añadiendo empresa:', error);
+      alert('Error al registrar: ' + error.message);
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -882,20 +904,84 @@ export default function App() {
                       ESTÁNDARES MÍNIMOS // RESOLUCIÓN 0312 // NIVEL DE RIESGO
                     </p>
                   </div>
-                  {isAdmin && (
-                    <button 
-                      onClick={() => setShowNewCompanyModal(true)}
-                      className="px-6 py-3 bg-primary text-background font-headline font-black text-xs tracking-[0.2em] uppercase hover:bg-primary-container active:scale-95 transition-all flex items-center gap-2 rounded-sm"
-                    >
-                      <Plus className="w-4 h-4" /> AGREGAR EMPRESA
-                    </button>
-                  )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {companies
-                    .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.nit.includes(searchQuery))
-                    .map(company => (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                  {/* Formulario de Nueva Empresa */}
+                  <div className="md:col-span-1">
+                    <div className="bg-surface-container-low p-6 rounded-sm border border-outline-variant/10">
+                      <h3 className="font-headline font-black text-xs tracking-widest text-primary uppercase mb-6 flex items-center gap-2">
+                        <Plus className="w-4 h-4" />
+                        REGISTRAR NUEVA EMPRESA
+                      </h3>
+                      <form onSubmit={handleAddCompany} className="space-y-4">
+                        <div>
+                          <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">Nombre Comercial</label>
+                          <input 
+                            type="text" 
+                            required
+                            value={newCompany.name}
+                            onChange={(e) => setNewCompany({...newCompany, name: e.target.value})}
+                            className="w-full bg-surface-container-highest border-none text-[10px] font-body px-3 py-2 rounded-sm focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">NIT / Identificación</label>
+                          <input 
+                            type="text" 
+                            required
+                            value={newCompany.nit}
+                            onChange={(e) => setNewCompany({...newCompany, nit: e.target.value})}
+                            className="w-full bg-surface-container-highest border-none text-[10px] font-body px-3 py-2 rounded-sm focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">Nivel Riesgo (1-5)</label>
+                            <input 
+                              type="number" 
+                              min="1" max="5"
+                              value={newCompany.riskLevel}
+                              onChange={(e) => setNewCompany({...newCompany, riskLevel: Number(e.target.value) as 1|2|3|4|5})}
+                              className="w-full bg-surface-container-highest border-none text-[10px] font-body px-3 py-2 rounded-sm focus:ring-1 focus:ring-primary"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">Estándares (0312)</label>
+                            <select 
+                              value={newCompany.standardsCount}
+                              onChange={(e) => setNewCompany({...newCompany, standardsCount: Number(e.target.value) as 7|21|62})}
+                              className="w-full bg-surface-container-highest border-none text-[10px] font-body px-3 py-2 rounded-sm focus:ring-1 focus:ring-primary"
+                            >
+                              <option value={7}>7 Estándares</option>
+                              <option value={21}>21 Estándares</option>
+                              <option value={62}>62 Estándares</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">Sector Económico</label>
+                          <input 
+                            type="text" 
+                            value={newCompany.sector}
+                            onChange={(e) => setNewCompany({...newCompany, sector: e.target.value})}
+                            className="w-full bg-surface-container-highest border-none text-[10px] font-body px-3 py-2 rounded-sm focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                        <button 
+                          type="submit"
+                          className="w-full mt-4 py-3 bg-primary text-background font-headline font-black text-[10px] tracking-widest uppercase hover:bg-primary-container transition-all rounded-sm flex items-center justify-center gap-2"
+                        >
+                          <Plus className="w-3 h-3" />
+                          GUARDAR EN BASE DE DATOS
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+
+                  {/* Lista de Empresas Existentes */}
+                  <div className="md:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {companies.map(company => (
                     <div key={company.id} className="bg-surface-container-low border border-outline-variant/10 p-6 rounded-sm space-y-6 group hover:border-primary/30 transition-all">
                       <div className="flex justify-between items-start">
                         <div className="w-12 h-12 bg-surface-container-high rounded-sm flex items-center justify-center border border-outline-variant/20">
@@ -942,17 +1028,6 @@ export default function App() {
                         >
                           VER ESTÁNDARES
                         </button>
-                        {company.driveFolderUrl && (
-                          <a 
-                            href={company.driveFolderUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 bg-surface-container-high text-secondary hover:bg-secondary/10 transition-colors border border-outline-variant/10 rounded-sm flex items-center justify-center"
-                            title="Carpeta Drive (Origen)"
-                          >
-                            <FileText className="w-4 h-4" />
-                          </a>
-                        )}
                         {isAdmin && (
                           <>
                             <button 
@@ -980,6 +1055,7 @@ export default function App() {
                       </div>
                     </div>
                   ))}
+                  </div>
                 </div>
               </motion.div>
             )}
