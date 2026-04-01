@@ -17,19 +17,32 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 // MÉTODOS DE AUTENTICACIÓN (Remplazan a Firebase)
 // ==========================================
 
-export const loginWithGoogle = async () => {
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
+export const loginWithMagicLink = async (email: string) => {
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
     options: {
-      redirectTo: window.location.origin
-    }
+      emailRedirectTo: window.location.origin,
+    },
   });
-  
-  if (error) {
-    console.error("Error iniciando sesión con Google en Supabase:", error.message);
-    throw error;
-  }
-  
+  if (error) throw error;
+};
+
+export const loginWithPassword = async (email: string, password: string) => {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+  if (error) throw error;
+  return data;
+};
+
+export const getUserProfile = async (userId: string) => {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single();
+  if (error) return null;
   return data;
 };
 

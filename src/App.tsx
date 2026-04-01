@@ -36,7 +36,7 @@ import { cn } from './lib/utils';
 import { Worker, Alert, PPEStatus, DiagnosticResult, Company, MedicalExam, Vaccination } from './types';
 import { analyzeSafetyData, generateFormat } from './services/gemini';
 // Firebase y Auth reemplazados por Supabase
-import { supabase, loginWithGoogle, logout } from './supabase';
+import { supabase, loginWithMagicLink, loginWithPassword, logout } from './supabase';
 import { User } from '@supabase/supabase-js';
 import { 
   collection, 
@@ -281,6 +281,10 @@ const INITIAL_ALERTS: Alert[] = [
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginMethod, setLoginMethod] = useState<'magic' | 'password'>('magic');
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -328,12 +332,22 @@ export default function App() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+      const u = session?.user ?? null;
+      setUser(u);
+      if (u) {
+        import('./supabase').then(m => m.getUserProfile(u.id)).then(p => setUserProfile(p));
+      }
       setIsAuthReady(true);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      const u = session?.user ?? null;
+      setUser(u);
+      if (u) {
+        import('./supabase').then(m => m.getUserProfile(u.id)).then(p => setUserProfile(p));
+      } else {
+        setUserProfile(null);
+      }
       setIsAuthReady(true);
     });
 
@@ -388,17 +402,33 @@ export default function App() {
 
     const generateAlerts = async () => {
       const newAlerts: Alert[] = [];
+      const now = new Date();
+      
       workers.forEach(worker => {
         worker.medicalExams.forEach(exam => {
-          if (exam.status === 'Vencido') {
+          const expiryDate = new Date(exam.expiryDate);
+          const isPeriodic = exam.type === 'Periódico';
+          
+          if (isPeriodic && expiryDate < now) {
             newAlerts.push({
-              id: `A-MED-${worker.id}-${exam.id}`,
-              timestamp: new Date().toISOString(),
+              id: `A-MED-V-${worker.id}-${exam.id}`,
+              timestamp: now.toISOString(),
               workerId: worker.id,
               workerName: worker.name,
               type: 'MEDICAL_EXAM_EXPIRED',
               severity: 'critical',
-              message: `Examen médico (${exam.type}) vencido para ${worker.name}.`
+              message: `¡ALERTA SST! Examen Médico Periódico VENCIDO para ${worker.name}. Fecha límite: ${new Date(exam.expiryDate).toLocaleDateString()}.`
+            });
+          } else if (isPeriodic && expiryDate > now && (expiryDate.getTime() - now.getTime()) < (30 * 24 * 60 * 60 * 1000)) {
+            // Aviso si vence en menos de 30 días
+            newAlerts.push({
+              id: `A-MED-W-${worker.id}-${exam.id}`,
+              timestamp: now.toISOString(),
+              workerId: worker.id,
+              workerName: worker.name,
+              type: 'MEDICAL_EXAM_EXPIRED',
+              severity: 'warning',
+              message: `VIGILANCIA: Examen Periódico de ${worker.name} próximo a vencer (${new Date(exam.expiryDate).toLocaleDateString()}).`
             });
           }
         });
@@ -686,8 +716,12 @@ export default function App() {
             {user ? (
               <div className="flex items-center gap-3 pl-4 border-l border-outline-variant/20">
                 <div className="text-right hidden sm:block">
-                  <div className="text-[10px] font-black text-on-surface uppercase tracking-widest leading-none mb-1">{user.user_metadata?.full_name || user.user_metadata?.name || 'USUARIO'}</div>
-                  <div className="text-[8px] font-bold text-primary uppercase tracking-tighter leading-none">{isAdmin ? 'ADMINISTRADOR' : 'OBSERVADOR'}</div>
+                  <div className="text-[10px] font-black text-on-surface uppercase tracking-widest leading-none mb-1">
+                    {userProfile?.role === 'admin' ? 'SST ADMIN' : (companies.find(c => c.id === userProfile?.company_id)?.name || 'USUARIO EMPRESA')}
+                  </div>
+                  <div className="text-[8px] font-bold text-primary uppercase tracking-tighter leading-none">
+                    {userProfile?.role === 'admin' ? 'COMANDO CINÉTICO' : 'PANEL CLIENTE'}
+                  </div>
                 </div>
                 <button 
                   onClick={logout}
@@ -698,35 +732,64 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <button 
-                disabled={isLoggingIn}
-                onClick={async () => {
-                  setIsLoggingIn(true);
-                  try {
-                    await loginWithGoogle();
-                  } catch (error: any) {
-                    if (error.code === 'auth/cancelled-popup-request') {
-                      console.log('Solicitud de popup cancelada por el usuario o el sistema.');
-                    } else if (error.code === 'auth/popup-closed-by-user') {
-                      console.log('El usuario cerró la ventana de inicio de sesión.');
-                    } else {
-                      console.error('Error al iniciar sesión:', error);
-                    }
-                  } finally {
-                    setIsLoggingIn(false);
-                  }
-                }}
-                className="ml-4 px-4 py-2 bg-primary text-background font-headline font-black text-[10px] tracking-widest uppercase hover:bg-primary-container active:scale-95 transition-all rounded-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {isLoggingIn ? (
-                  <>
-                    <RefreshCw className="w-3 h-3 animate-spin" />
-                    INGRESANDO...
-                  </>
-                ) : (
-                  'INGRESAR'
-                )}
-              </button>
+              <div className="flex flex-col items-end gap-2 pr-4">
+                <div className="flex bg-surface-container p-1 rounded-sm">
+                  <button 
+                    onClick={() => setLoginMethod('magic')}
+                    className={cn("px-3 py-1 text-[8px] font-black uppercase tracking-widest transition-all", loginMethod === 'magic' ? "bg-primary text-background shadow-lg" : "text-on-surface-variant hover:text-on-surface")}
+                  >USUARIO SST</button>
+                  <button 
+                    onClick={() => setLoginMethod('password')}
+                    className={cn("px-3 py-1 text-[8px] font-black uppercase tracking-widest transition-all", loginMethod === 'password' ? "bg-primary text-background shadow-lg" : "text-on-surface-variant hover:text-on-surface")}
+                  >DUEÑO EMPRESA</button>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="email"
+                    placeholder="CORREO@EJEMPLO.COM"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="bg-surface-container-highest border-none text-[9px] font-label tracking-widest px-3 py-2 w-48 focus:ring-1 focus:ring-primary rounded-sm uppercase"
+                  />
+                  {loginMethod === 'password' && (
+                    <input 
+                      type="password"
+                      placeholder="CONTRASEÑA"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="bg-surface-container-highest border-none text-[9px] font-label tracking-widest px-3 py-2 w-32 focus:ring-1 focus:ring-primary rounded-sm"
+                    />
+                  )}
+                  <button 
+                    disabled={isLoggingIn || !email}
+                    onClick={async () => {
+                      if (!email) return;
+                      setIsLoggingIn(true);
+                      try {
+                        if (loginMethod === 'magic') {
+                          await loginWithMagicLink(email.toLowerCase());
+                          alert('¡Enlace enviado! Revisa tu correo para entrar.');
+                        } else {
+                          await loginWithPassword(email.toLowerCase(), password);
+                        }
+                      } catch (error: any) {
+                        console.error('Error al iniciar sesión:', error);
+                        alert('Error: ' + error.message);
+                      } finally {
+                        setIsLoggingIn(false);
+                      }
+                    }}
+                    className="px-4 py-2 bg-primary text-background font-headline font-black text-[10px] tracking-widest uppercase hover:bg-primary-container active:scale-95 transition-all rounded-sm disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isLoggingIn ? (
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                    ) : (
+                      loginMethod === 'magic' ? 'ENVIAR ACCESO' : 'ENTRAR AL PORTAL'
+                    )}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>
