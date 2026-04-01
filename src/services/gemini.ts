@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { DiagnosticResult } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const ai = new GoogleGenAI(import.meta.env.VITE_GEMINI_API_KEY || "");
 
 export async function analyzeSafetyData(data: any): Promise<DiagnosticResult> {
   const response = await ai.models.generateContent({
