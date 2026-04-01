@@ -360,6 +360,60 @@ export default function App() {
     return userProfile?.role === 'admin' || user?.email === 'alianza2026@sociedadsst26.com';
   }, [userProfile, user]);
 
+  const filteredCompanies = useMemo(() => {
+    if (isAdmin) return companies;
+    return companies.filter(c => c.id === userProfile?.company_id);
+  }, [companies, userProfile, isAdmin]);
+
+  const filteredWorkers = useMemo(() => {
+    const companyIds = filteredCompanies.map(c => c.id);
+    return workers.filter(w => companyIds.includes(w.companyId));
+  }, [workers, filteredCompanies]);
+
+  const filteredAlerts = useMemo(() => {
+    const workerIds = filteredWorkers.map(w => w.id);
+    const localAlerts = alerts.filter(a => a.workerId && workerIds.includes(a.workerId));
+    // Combinar con alertas globales si es admin
+    return isAdmin ? alerts : localAlerts;
+  }, [alerts, filteredWorkers, isAdmin]);
+
+  const handleDownloadReport = () => {
+    const currentCompany = filteredCompanies[0];
+    if (!currentCompany) {
+      alert('No hay datos de empresa para generar el reporte.');
+      return;
+    }
+
+    const reportContent = `
+===========================================================
+REPORTAJE DE CUMPLIMIENTO SST - AXÓN COMANDO CINÉTICO
+===========================================================
+Empresa: ${currentCompany.name}
+NIT: ${currentCompany.nit}
+Fecha de Reporte: ${new Date().toLocaleString()}
+Responsable: ${user?.email}
+-----------------------------------------------------------
+RESUMEN DE ESTADO:
+- Cumplimiento Resolución 0312: ${currentCompany.compliancePercentage}%
+- Estándares Auditados: ${currentCompany.completedStandards.length} de ${currentCompany.standardsCount}
+- Personal en Vigilancia: ${filteredWorkers.filter(w => w.employmentStatus === 'Activo').length} unidades
+- Alertas Críticas Detectadas: ${filteredAlerts.filter(a => a.severity === 'critical').length}
+- Avisos de Vigilancia: ${filteredAlerts.filter(a => a.severity === 'warning').length}
+
+Este documento certifica el estado actual de los protocolos SST.
+Validado por el Sistema de Comando Cinético Axón.
+===========================================================
+    `;
+
+    const blob = new Blob([reportContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Reporte_SST_${currentCompany.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Real-time updates from Firestore
   useEffect(() => {
     if (!isAuthReady || !user) return;
@@ -402,7 +456,7 @@ export default function App() {
 
   // Check for medical and vaccination alerts
   useEffect(() => {
-    if (!isAuthReady || !isAdmin) return;
+    if (!isAuthReady) return;
 
     const generateAlerts = async () => {
       const newAlerts: Alert[] = [];
@@ -424,7 +478,6 @@ export default function App() {
               message: `¡ALERTA SST! Examen Médico Periódico VENCIDO para ${worker.name}. Fecha límite: ${new Date(exam.expiryDate).toLocaleDateString()}.`
             });
           } else if (isPeriodic && expiryDate > now && (expiryDate.getTime() - now.getTime()) < (30 * 24 * 60 * 60 * 1000)) {
-            // Aviso si vence en menos de 30 días
             newAlerts.push({
               id: `A-MED-W-${worker.id}-${exam.id}`,
               timestamp: now.toISOString(),
@@ -450,7 +503,6 @@ export default function App() {
           }
         });
       });
-
       // Persist new alerts to Firestore
       for (const alert of newAlerts) {
         const alertExists = alerts.some(a => a.id === alert.id);
@@ -719,9 +771,9 @@ export default function App() {
               )}
             >
               <Bell className="w-5 h-5" />
-              {alerts.length > 0 && (
+              {filteredAlerts.length > 0 && (
                 <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-error text-[8px] font-black text-on-error flex items-center justify-center rounded-full border-2 border-background">
-                  {alerts.length}
+                  {filteredAlerts.length}
                 </span>
               )}
             </button>
@@ -904,84 +956,94 @@ export default function App() {
                       ESTÁNDARES MÍNIMOS // RESOLUCIÓN 0312 // NIVEL DE RIESGO
                     </p>
                   </div>
+                  {userProfile?.role !== 'admin' && (
+                    <button 
+                      onClick={handleDownloadReport}
+                      className="px-6 py-3 bg-primary text-background font-headline font-black text-xs tracking-widest uppercase hover:bg-primary-container transition-all rounded-sm"
+                    >
+                      DESCARGAR REPORTE
+                    </button>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                   {/* Formulario de Nueva Empresa */}
-                  <div className="md:col-span-1">
-                    <div className="bg-surface-container-low p-6 rounded-sm border border-outline-variant/10">
-                      <h3 className="font-headline font-black text-xs tracking-widest text-primary uppercase mb-6 flex items-center gap-2">
-                        <Plus className="w-4 h-4" />
-                        REGISTRAR NUEVA EMPRESA
-                      </h3>
-                      <form onSubmit={handleAddCompany} className="space-y-4">
-                        <div>
-                          <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">Nombre Comercial</label>
-                          <input 
-                            type="text" 
-                            required
-                            value={newCompany.name}
-                            onChange={(e) => setNewCompany({...newCompany, name: e.target.value})}
-                            className="w-full bg-surface-container-highest border-none text-[10px] font-body px-3 py-2 rounded-sm focus:ring-1 focus:ring-primary"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">NIT / Identificación</label>
-                          <input 
-                            type="text" 
-                            required
-                            value={newCompany.nit}
-                            onChange={(e) => setNewCompany({...newCompany, nit: e.target.value})}
-                            className="w-full bg-surface-container-highest border-none text-[10px] font-body px-3 py-2 rounded-sm focus:ring-1 focus:ring-primary"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
+                  {isAdmin && (
+                    <div className="md:col-span-1">
+                      <div className="bg-surface-container-low p-6 rounded-sm border border-outline-variant/10">
+                        <h3 className="font-headline font-black text-xs tracking-widest text-primary uppercase mb-6 flex items-center gap-2">
+                          <Plus className="w-4 h-4" />
+                          REGISTRAR NUEVA EMPRESA
+                        </h3>
+                        <form onSubmit={handleAddCompany} className="space-y-4">
                           <div>
-                            <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">Nivel Riesgo (1-5)</label>
+                            <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">Nombre Comercial</label>
                             <input 
-                              type="number" 
-                              min="1" max="5"
-                              value={newCompany.riskLevel}
-                              onChange={(e) => setNewCompany({...newCompany, riskLevel: Number(e.target.value) as 1|2|3|4|5})}
+                              type="text" 
+                              required
+                              value={newCompany.name}
+                              onChange={(e) => setNewCompany({...newCompany, name: e.target.value})}
                               className="w-full bg-surface-container-highest border-none text-[10px] font-body px-3 py-2 rounded-sm focus:ring-1 focus:ring-primary"
                             />
                           </div>
                           <div>
-                            <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">Estándares (0312)</label>
-                            <select 
-                              value={newCompany.standardsCount}
-                              onChange={(e) => setNewCompany({...newCompany, standardsCount: Number(e.target.value) as 7|21|62})}
+                            <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">NIT / Identificación</label>
+                            <input 
+                              type="text" 
+                              required
+                              value={newCompany.nit}
+                              onChange={(e) => setNewCompany({...newCompany, nit: e.target.value})}
                               className="w-full bg-surface-container-highest border-none text-[10px] font-body px-3 py-2 rounded-sm focus:ring-1 focus:ring-primary"
-                            >
-                              <option value={7}>7 Estándares</option>
-                              <option value={21}>21 Estándares</option>
-                              <option value={62}>62 Estándares</option>
-                            </select>
+                            />
                           </div>
-                        </div>
-                        <div>
-                          <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">Sector Económico</label>
-                          <input 
-                            type="text" 
-                            value={newCompany.sector}
-                            onChange={(e) => setNewCompany({...newCompany, sector: e.target.value})}
-                            className="w-full bg-surface-container-highest border-none text-[10px] font-body px-3 py-2 rounded-sm focus:ring-1 focus:ring-primary"
-                          />
-                        </div>
-                        <button 
-                          type="submit"
-                          className="w-full mt-4 py-3 bg-primary text-background font-headline font-black text-[10px] tracking-widest uppercase hover:bg-primary-container transition-all rounded-sm flex items-center justify-center gap-2"
-                        >
-                          <Plus className="w-3 h-3" />
-                          GUARDAR EN BASE DE DATOS
-                        </button>
-                      </form>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">Nivel Riesgo (1-5)</label>
+                              <input 
+                                type="number" 
+                                min="1" max="5"
+                                value={newCompany.riskLevel}
+                                onChange={(e) => setNewCompany({...newCompany, riskLevel: Number(e.target.value) as 1|2|3|4|5})}
+                                className="w-full bg-surface-container-highest border-none text-[10px] font-body px-3 py-2 rounded-sm focus:ring-1 focus:ring-primary"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">Estándares (0312)</label>
+                              <select 
+                                value={newCompany.standardsCount}
+                                onChange={(e) => setNewCompany({...newCompany, standardsCount: Number(e.target.value) as 7|21|62})}
+                                className="w-full bg-surface-container-highest border-none text-[10px] font-body px-3 py-2 rounded-sm focus:ring-1 focus:ring-primary"
+                              >
+                                <option value={7}>7 Estándares</option>
+                                <option value={21}>21 Estándares</option>
+                                <option value={62}>62 Estándares</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-[8px] font-bold text-on-surface-variant uppercase tracking-tighter mb-1">Sector Económico</label>
+                            <input 
+                              type="text" 
+                              value={newCompany.sector}
+                              onChange={(e) => setNewCompany({...newCompany, sector: e.target.value})}
+                              className="w-full bg-surface-container-highest border-none text-[10px] font-body px-3 py-2 rounded-sm focus:ring-1 focus:ring-primary"
+                            />
+                          </div>
+                          <button 
+                            type="submit"
+                            className="w-full mt-4 py-3 bg-primary text-background font-headline font-black text-[10px] tracking-widest uppercase hover:bg-primary-container transition-all rounded-sm flex items-center justify-center gap-2"
+                          >
+                            <Plus className="w-3 h-3" />
+                            GUARDAR EN BASE DE DATOS
+                          </button>
+                        </form>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Lista de Empresas Existentes */}
-                  <div className="md:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {companies.map(company => (
+                  <div className={cn("grid grid-cols-1 lg:grid-cols-2 gap-6", isAdmin ? "md:col-span-2" : "md:col-span-3")}>
+                    {filteredCompanies.map(company => (
                     <div key={company.id} className="bg-surface-container-low border border-outline-variant/10 p-6 rounded-sm space-y-6 group hover:border-primary/30 transition-all">
                       <div className="flex justify-between items-start">
                         <div className="w-12 h-12 bg-surface-container-high rounded-sm flex items-center justify-center border border-outline-variant/20">
@@ -1591,8 +1653,8 @@ export default function App() {
                         <span className="text-[0.6875rem] font-bold text-on-surface uppercase tracking-widest">Alertas Activas</span>
                       </div>
                       <div className="text-[0.6875rem] text-on-surface-variant leading-relaxed uppercase">
-                        {alerts.length > 0 
-                          ? `SE DETECTARON ${alerts.length} ANOMALÍAS EN EL SECTOR. REVISAR PROTOCOLO.`
+                        {filteredAlerts.length > 0 
+                          ? `SE DETECTARON ${filteredAlerts.length} ANOMALÍAS EN EL SECTOR. REVISAR PROTOCOLO.`
                           : "NO SE DETECTARON ANOMALÍAS CRÍTICAS EN LAS ÚLTIMAS 24H. SISTEMAS NOMINALES."}
                       </div>
                     </div>
@@ -1606,7 +1668,7 @@ export default function App() {
                     <span className="text-[10px] text-on-surface-variant uppercase">AUTO-ACTUALIZAR: 2S</span>
                   </div>
                   <div className="h-48 overflow-y-auto font-label">
-                    {alerts.map((alert, idx) => (
+                    {filteredAlerts.map((alert, idx) => (
                       <div key={alert.id} className="grid grid-cols-12 gap-4 px-6 py-3 border-b border-outline-variant/10 items-center hover:bg-surface-variant/50 transition-colors">
                         <div className="col-span-2 text-[10px] text-on-surface-variant">{new Date(alert.timestamp).toLocaleTimeString()}</div>
                         <div className="col-span-1">
@@ -1643,7 +1705,7 @@ export default function App() {
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
                     <h2 className="text-2xl font-headline font-bold tracking-tight">Directorio de Personal</h2>
-                    <p className="text-on-surface-variant text-sm">Monitoreando {workers.filter(w => w.employmentStatus === 'Activo').length} unidades activas.</p>
+                    <p className="text-on-surface-variant text-sm">Monitoreando {filteredWorkers.filter(w => w.employmentStatus === 'Activo').length} unidades activas.</p>
                   </div>
                   <div className="flex items-center gap-4">
                     {isAdmin && (
@@ -1697,7 +1759,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {workers
+                      {filteredWorkers
                         .filter(w => {
                           const matchesSearch = w.name.toLowerCase().includes(searchQuery.toLowerCase()) || w.id.toLowerCase().includes(searchQuery.toLowerCase());
                           if (!matchesSearch) return false;
@@ -1974,14 +2036,14 @@ export default function App() {
                     <div className="glass-panel px-6 py-3 rounded-sm border-l-4 border-error flex items-center gap-4">
                       <div className="text-right">
                         <div className="text-[10px] font-black text-on-surface-variant uppercase tracking-widest">CRÍTICAS</div>
-                        <div className="text-error font-headline text-2xl font-black">{alerts.filter(a => a.severity === 'critical').length}</div>
+                        <div className="text-error font-headline text-2xl font-black">{filteredAlerts.filter(a => a.severity === 'critical').length}</div>
                       </div>
                       <AlertTriangle className="w-8 h-8 text-error animate-pulse" />
                     </div>
                     <div className="glass-panel px-6 py-3 rounded-sm border-l-4 border-secondary flex items-center gap-4">
                       <div className="text-right">
                         <div className="text-[10px] font-black text-on-surface-variant uppercase tracking-widest">ADVERTENCIAS</div>
-                        <div className="text-secondary font-headline text-2xl font-black">{alerts.filter(a => a.severity === 'warning').length}</div>
+                        <div className="text-secondary font-headline text-2xl font-black">{filteredAlerts.filter(a => a.severity === 'warning').length}</div>
                       </div>
                       <Bell className="w-8 h-8 text-secondary" />
                     </div>
@@ -2033,8 +2095,8 @@ export default function App() {
                     <span className="text-[10px] font-black tracking-[0.2em] text-on-surface uppercase">HISTORIAL DE INCIDENCIAS</span>
                   </div>
                   <div className="divide-y divide-outline-variant/10">
-                    {alerts.length > 0 ? (
-                      alerts
+                    {filteredAlerts.length > 0 ? (
+                      filteredAlerts
                         .filter(a => {
                           if (alertFilter === 'Críticos') return a.severity === 'critical';
                           if (alertFilter === 'Avisos') return a.severity === 'warning';
