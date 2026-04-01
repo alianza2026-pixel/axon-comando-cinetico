@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: companies
+    // Document ID: companyId
+    // Fields: id, name, nit, riskLevel, workerCount, standardsCount, completedStandards, compliancePercentage
+    //
+    // Collection: workers
+    // Document ID: workerId
+    // Fields: id, name, role, companyId, employmentStatus, riskLevel, location, lastCheck, status, vitals, medicalExams, vaccinations
+    //
+    // Collection: alerts
+    // Document ID: alertId
+    // Fields: id, timestamp, workerId, workerName, type, severity, message
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (request.auth.token.email == "alianza2026@sociedadsst26.com" && request.auth.token.email_verified == true);
+    }
+
+    // Validation Functions
+    function isValidCompany(data) {
+      return data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.nit is string && data.nit.size() > 0 && data.nit.size() < 50 &&
+             data.riskLevel is number && data.riskLevel >= 1 && data.riskLevel <= 5 &&
+             data.workerCount is number && data.workerCount >= 0 &&
+             data.standardsCount is number &&
+             data.completedStandards is list &&
+             data.compliancePercentage is number;
+    }
+
+    function isValidWorker(data) {
+      return data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.role is string && data.role.size() > 0 && data.role.size() < 100 &&
+             data.companyId is string &&
+             data.employmentStatus in ['Activo', 'Retirado'] &&
+             data.riskLevel in ['low', 'medium', 'high'] &&
+             data.location is string &&
+             data.lastCheck is string &&
+             data.status is map &&
+             data.vitals is map &&
+             data.medicalExams is list &&
+             data.vaccinations is list;
+    }
+
+    function isValidAlert(data) {
+      return data.id is string &&
+             data.timestamp is string &&
+             data.type is string &&
+             data.severity in ['critical', 'warning', 'info'] &&
+             data.message is string && data.message.size() > 0 && data.message.size() < 1000;
+    }
+
+    match /companies/{companyId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() && isValidCompany(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /workers/{workerId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() && isValidWorker(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /alerts/{alertId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidAlert(request.resource.data);
+      allow update: if isAdmin() && isValidAlert(request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}

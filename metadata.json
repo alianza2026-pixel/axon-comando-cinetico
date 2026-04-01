@@ -1,0 +1,9 @@
+{
+  "name": "AXON SST | COMANDO CINÉTICO",
+  "description": "Sistema de gestión de seguridad y salud en el trabajo (SST) con monitoreo en tiempo real, análisis de EPP y diagnóstico por IA.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
